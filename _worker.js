@@ -1,8 +1,8 @@
 // superbig-gateway — the CF Pages entry for superbig.jiangjiangze.icu.
 //
-// The game server runs in a ModelScope container. Page navigations get this site's shell; EVERYTHING else
-// (js/css/vendor/data/assets/fonts/icons, /ws, /healthz, /api/*) is proxied to the studio, so the browser sees the
-// real bytes instead of the HTML fallback (which is what made the board art and data manifests fail to load).
+// Page navigations get this site's shell; EVERYTHING else (js/css/vendor/data/assets/fonts/... /ws /healthz /api/*)
+// is proxied to the studio byte-for-byte. The Host header is left alone (Cloudflare sets it from the target URL);
+// overriding it made the upstream answer with an HTML error page instead of the file.
 const ORIGIN = 'https://jingjiangze-stronghold-protocol.ms.show';
 const STATIC_PREFIX = /^\/(js|css|vendor|data|assets|fonts|media|icons|packs|shared|schemas)\//;
 
@@ -12,16 +12,15 @@ export default {
     const wantsHtml = (req.headers.get('accept') || '').includes('text/html');
     const isStatic = STATIC_PREFIX.test(url.pathname);
     const isApi = url.pathname === '/ws' || url.pathname === '/healthz' || url.pathname.startsWith('/api/');
-    if (wantsHtml && !isStatic && !isApi) return env.ASSETS.fetch(req);
+    if (wantsHtml && !isStatic && !isApi) { const r = await env.ASSETS.fetch(req); const o = new Response(r.body, r); o.headers.set('x-sbg','assets'); return o; }
 
     const target = new URL(url.pathname + url.search, ORIGIN);
-    const headers = new Headers(req.headers);
-    headers.set('host', new URL(ORIGIN).host);
-    const upstream = await fetch(target, {
-      method: req.method, headers, body: req.body, redirect: 'manual',
-    });
+    const init = { method: req.method, headers: req.headers, redirect: 'manual' };
+    if (req.method !== 'GET' && req.method !== 'HEAD') init.body = req.body;
+    const upstream = await fetch(target, init);
     const out = new Response(upstream.body, upstream);
     out.headers.set('access-control-allow-origin', '*');
+    out.headers.set('x-sbg', 'proxy');
     return out;
   },
 };
